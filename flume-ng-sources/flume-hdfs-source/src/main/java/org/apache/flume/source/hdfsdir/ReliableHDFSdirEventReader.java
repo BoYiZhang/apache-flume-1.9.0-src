@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.flume.source.taildir;
+package org.apache.flume.source.hdfsdir;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -46,15 +46,15 @@ import java.util.Map.Entry;
 
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
-public class ReliableTaildirEventReader implements ReliableEventReader {
-  private static final Logger logger = LoggerFactory.getLogger(ReliableTaildirEventReader.class);
+public class ReliableHDFSdirEventReader implements ReliableEventReader {
+  private static final Logger logger = LoggerFactory.getLogger(ReliableHDFSdirEventReader.class);
 
-  private final List<TaildirMatcher> taildirCache;
+  private final List<HDFSdirMatcher> hdfsdirCache;
 
   private final Table<String, String, String> headerTable;
 
-  private TailFile currentFile = null;
-  private Map<Long, TailFile> tailFiles = Maps.newHashMap();
+  private HDFSFile currentFile = null;
+  private Map<Long, HDFSFile> hdfsFiles = Maps.newHashMap();
   private long updateTime;
   private boolean addByteOffset;
   private boolean cachePatternMatching;
@@ -63,9 +63,9 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
   private final String fileNameHeader;
 
   /**
-   * Create a ReliableTaildirEventReader to watch the given directory.
+   * Create a ReliableHDFSdirEventReader to watch the given directory.
    */
-  private ReliableTaildirEventReader(Map<String, String> filePaths,
+  private ReliableHDFSdirEventReader(Map<String, String> filePaths,
       Table<String, String, String> headerTable, String positionFilePath,
       boolean skipToEnd, boolean addByteOffset, boolean cachePatternMatching,
       boolean annotateFileName, String fileNameHeader) throws IOException {
@@ -75,25 +75,25 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
 
     if (logger.isDebugEnabled()) {
       logger.debug("Initializing {} with directory={}, metaDir={}",
-          new Object[] { ReliableTaildirEventReader.class.getSimpleName(), filePaths });
+          new Object[] { ReliableHDFSdirEventReader.class.getSimpleName(), filePaths });
     }
 
-    List<TaildirMatcher> taildirCache = Lists.newArrayList();
+    List<HDFSdirMatcher> hdfsdirCache = Lists.newArrayList();
     for (Entry<String, String> e : filePaths.entrySet()) {
-      taildirCache.add(new TaildirMatcher(e.getKey(), e.getValue(), cachePatternMatching));
+      hdfsdirCache.add(new HDFSdirMatcher(e.getKey(), e.getValue(), cachePatternMatching));
     }
-    logger.info("taildirCache: " + taildirCache.toString());
+    logger.info("hdfsdirCache: " + hdfsdirCache.toString());
     logger.info("headerTable: " + headerTable.toString());
 
-    this.taildirCache = taildirCache;
+    this.hdfsdirCache = hdfsdirCache;
     this.headerTable = headerTable;
     this.addByteOffset = addByteOffset;
     this.cachePatternMatching = cachePatternMatching;
     this.annotateFileName = annotateFileName;
     this.fileNameHeader = fileNameHeader;
 
-    //todo 更新 Tail 文件
-    updateTailFiles(skipToEnd);
+    //todo 更新 HDFS 文件
+    updateHDFSFiles(skipToEnd);
     //todo 更新位置文件
     logger.info("Updating position from position file: " + positionFilePath);
     loadPositionFile(positionFilePath);
@@ -101,10 +101,10 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
 
   /**
    * Load a position file which has the last read position of each file.
-   * If the position file exists, update tailFiles mapping.
+   * If the position file exists, update hdfsFiles mapping.
    *
    * 加载具有每个文件的最后读取位置的位置文件。
-   * 如果位置文件存在，更新tailFiles映射。
+   * 如果位置文件存在，更新hdfsFiles映射。
    *
    */
   public void loadPositionFile(String filePath) {
@@ -140,9 +140,9 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
           Preconditions.checkNotNull(v, "Detected missing value in position file. "
               + "inode: " + inode + ", pos: " + pos + ", path: " + path);
         }
-        TailFile tf = tailFiles.get(inode);
+        HDFSFile tf = hdfsFiles.get(inode);
         if (tf != null && tf.updatePos(path, inode, pos)) {
-          tailFiles.put(inode, tf);
+          hdfsFiles.put(inode, tf);
         } else {
           logger.info("Missing file: " + path + ", inode: " + inode + ", pos: " + pos);
         }
@@ -162,11 +162,11 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
     }
   }
 
-  public Map<Long, TailFile> getTailFiles() {
-    return tailFiles;
+  public Map<Long, HDFSFile> getHDFSFiles() {
+    return hdfsFiles;
   }
 
-  public void setCurrentFile(TailFile currentFile) {
+  public void setCurrentFile(HDFSFile currentFile) {
     this.currentFile = currentFile;
   }
 
@@ -185,7 +185,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
   }
 
   @VisibleForTesting
-  public List<Event> readEvents(TailFile tf, int numEvents) throws IOException {
+  public List<Event> readEvents(HDFSFile tf, int numEvents) throws IOException {
     setCurrentFile(tf);
     return readEvents(numEvents, true);
   }
@@ -236,7 +236,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
 
   @Override
   public void close() throws IOException {
-    for (TailFile tf : tailFiles.values()) {
+    for (HDFSFile tf : hdfsFiles.values()) {
       if (tf.getRaf() != null) tf.getRaf().close();
     }
   }
@@ -253,20 +253,20 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
   }
 
   /**
-   * Update tailFiles mapping if a new file is created or appends are detected
+   * Update hdfsFiles mapping if a new file is created or appends are detected
    * to the existing file.
    */
-  public List<Long> updateTailFiles(boolean skipToEnd) throws IOException {
+  public List<Long> updateHDFSFiles(boolean skipToEnd) throws IOException {
     updateTime = System.currentTimeMillis();
     List<Long> updatedInodes = Lists.newArrayList();
-    //todo     获取缓存中的 taildir ,
-    //todo     taildir对象内容:   {filegroup='f1', filePattern='/todo/flume/taildir/input/data.log', cached=true}
-    for (TaildirMatcher taildir : taildirCache) {
-      //todo    taildir     :  {filegroup='f1', filePattern='/todo/flume/taildir/input/data.log', cached=true}
+    //todo     获取缓存中的 hdfsdir ,
+    //todo     hdfsdir对象内容:   {filegroup='f1', filePattern='/todo/flume/hdfsdir/input/data.log', cached=true}
+    for (HDFSdirMatcher hdfsdir : hdfsdirCache) {
+      //todo    hdfsdir     :  {filegroup='f1', filePattern='/todo/flume/hdfsdir/input/data.log', cached=true}
       //todo    headerTable :  {f1={headerKey1=markHeaderKey}}
-      Map<String, String> headers = headerTable.row(taildir.getFileGroup());
+      Map<String, String> headers = headerTable.row(hdfsdir.getFileGroup());
       // todo 获取匹配文件,并将文件按最后修改时间进行排序
-      for (File f : taildir.getMatchingFiles()) {
+      for (File f : hdfsdir.getMatchingFiles()) {
         long inode;
         try {
 
@@ -278,7 +278,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
           continue;
         }
 
-        TailFile tf = tailFiles.get(inode);
+        HDFSFile tf = hdfsFiles.get(inode);
 
 
         if (tf == null || !tf.getPath().equals(f.getAbsolutePath())) {
@@ -287,7 +287,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
 
           long startPos = skipToEnd ? f.length() : 0;
 
-          //todo 读取文件获取 操作对象实例 TailFile
+          //todo 读取文件获取 操作对象实例 HDFSFile
           tf = openFile(f, headers, inode, startPos);
 
 
@@ -318,13 +318,13 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
           }
 
 
-          tf.setNeedTail(updated);
+          tf.setNeedHDFS(updated);
 
 
         }
 
         //todo 更新文件
-        tailFiles.put(inode, tf);
+        hdfsFiles.put(inode, tf);
 
 
         updatedInodes.add(inode);
@@ -335,8 +335,8 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
     return updatedInodes;
   }
 
-  public List<Long> updateTailFiles() throws IOException {
-    return updateTailFiles(false);
+  public List<Long> updateHDFSFiles() throws IOException {
+    return updateHDFSFiles(false);
   }
 
 
@@ -346,18 +346,18 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
   }
 
 
-  //todo  方法根据日志文件对象，headers，inode和偏移量pos创建一个TailFile对象
-  private TailFile openFile(File file, Map<String, String> headers, long inode, long pos) {
+  //todo  方法根据日志文件对象，headers，inode和偏移量pos创建一个HDFSFile对象
+  private HDFSFile openFile(File file, Map<String, String> headers, long inode, long pos) {
     try {
       logger.info("Opening file: " + file + ", inode: " + inode + ", pos: " + pos);
-      return new TailFile(file, headers, inode, pos);
+      return new HDFSFile(file, headers, inode, pos);
     } catch (IOException e) {
       throw new FlumeException("Failed opening file: " + file, e);
     }
   }
 
   /**
-   * Special builder class for ReliableTaildirEventReader
+   * Special builder class for ReliableHDFSdirEventReader
    */
   public static class Builder {
     private Map<String, String> filePaths;
@@ -367,9 +367,9 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
     private boolean addByteOffset;
     private boolean cachePatternMatching;
     private Boolean annotateFileName =
-            TaildirSourceConfigurationConstants.DEFAULT_FILE_HEADER;
+            HDFSdirSourceConfigurationConstants.DEFAULT_FILE_HEADER;
     private String fileNameHeader =
-            TaildirSourceConfigurationConstants.DEFAULT_FILENAME_HEADER_KEY;
+            HDFSdirSourceConfigurationConstants.DEFAULT_FILENAME_HEADER_KEY;
 
     public Builder filePaths(Map<String, String> filePaths) {
       this.filePaths = filePaths;
@@ -411,8 +411,8 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
       return this;
     }
 
-    public ReliableTaildirEventReader build() throws IOException {
-      return new ReliableTaildirEventReader(filePaths, headerTable, positionFilePath, skipToEnd,
+    public ReliableHDFSdirEventReader build() throws IOException {
+      return new ReliableHDFSdirEventReader(filePaths, headerTable, positionFilePath, skipToEnd,
                                             addByteOffset, cachePatternMatching,
                                             annotateFileName, fileNameHeader);
     }

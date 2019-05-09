@@ -45,13 +45,9 @@ import org.apache.flume.annotations.Disposable;
 import org.apache.flume.channel.ChannelProcessor;
 import org.apache.flume.channel.ChannelSelectorFactory;
 import org.apache.flume.channel.DefaultChannelFactory;
-import org.apache.flume.conf.BasicConfigurationConstants;
-import org.apache.flume.conf.BatchSizeSupported;
-import org.apache.flume.conf.ComponentConfiguration;
-import org.apache.flume.conf.Configurables;
-import org.apache.flume.conf.FlumeConfiguration;
+import org.apache.flume.channel.MemoryChannel;
+import org.apache.flume.conf.*;
 import org.apache.flume.conf.FlumeConfiguration.AgentConfiguration;
-import org.apache.flume.conf.TransactionCapacitySupported;
 import org.apache.flume.conf.channel.ChannelSelectorConfiguration;
 import org.apache.flume.conf.sink.SinkConfiguration;
 import org.apache.flume.conf.sink.SinkGroupConfiguration;
@@ -224,7 +220,16 @@ public abstract class AbstractConfigurationProvider implements ConfigurationProv
         try {
 
           //todo 更新配置 , 因为 channelComponentMap 刚开始传进来的时候是空值
-          Configurables.configure(channel, comp);
+          boolean isConf = Configurables.configure(channel, comp);
+          if(!isConf){
+
+            if (channel instanceof MemoryChannel) {
+
+
+              ((MemoryChannel) channel).configure(new Context());
+            }
+          }
+
           channelComponentMap.put(comp.getComponentName(),
               new ChannelComponent(channel));
           LOGGER.info("Created channel " + chName);

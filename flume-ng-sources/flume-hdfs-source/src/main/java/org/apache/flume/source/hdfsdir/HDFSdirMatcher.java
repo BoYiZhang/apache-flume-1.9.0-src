@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.flume.source.taildir;
+package org.apache.flume.source.hdfsdir;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
@@ -28,12 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.PathMatcher;
+import java.nio.file.*;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -59,14 +54,14 @@ import java.util.concurrent.TimeUnit;
  * that system clock is used for file system timestamps. If it is not the case then configure it
  * as uncached. Class is solely for package only usage. Member functions are not thread safe.
  *
- * @see TaildirSource
- * @see ReliableTaildirEventReader
- * @see TaildirSourceConfigurationConstants
+ * @see HDFSdirSource
+ * @see ReliableHDFSdirEventReader
+ * @see HDFSdirSourceConfigurationConstants
  */
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
-public class TaildirMatcher {
-  private static final Logger logger = LoggerFactory.getLogger(TaildirMatcher.class);
+public class HDFSdirMatcher {
+  private static final Logger logger = LoggerFactory.getLogger(HDFSdirMatcher.class);
   private static final FileSystem FS = FileSystems.getDefault();
 
   // flag from configuration to switch off caching completely
@@ -121,9 +116,9 @@ public class TaildirMatcher {
    * @param cachePatternMatching default true, recommended in every setup especially with huge
    *                             parent directories. Don't set when local system clock is not used
    *                             for stamping mtime (eg: remote filesystems)
-   * @see TaildirSourceConfigurationConstants
+   * @see HDFSdirSourceConfigurationConstants
    */
-  TaildirMatcher(String fileGroup, String filePattern, boolean cachePatternMatching) {
+  HDFSdirMatcher(String fileGroup, String filePattern, boolean cachePatternMatching) {
     // store whatever came from configuration
     this.fileGroup = fileGroup;
     this.filePattern = filePattern;
@@ -279,7 +274,7 @@ public class TaildirMatcher {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
 
-    TaildirMatcher that = (TaildirMatcher) o;
+    HDFSdirMatcher that = (HDFSdirMatcher) o;
 
     return fileGroup.equals(that.fileGroup);
 

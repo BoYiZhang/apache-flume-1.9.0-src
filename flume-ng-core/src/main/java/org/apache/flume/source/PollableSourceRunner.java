@@ -130,15 +130,23 @@ public class PollableSourceRunner extends SourceRunner {
         counterGroup.incrementAndGet("runner.polls");
 
         try {
-          if (source.process().equals(PollableSource.Status.BACKOFF)) {
+
+          //TODO   运行!!!!!!!!!!!!!!
+          if (  source.process().equals(PollableSource.Status.BACKOFF)  ) {
             counterGroup.incrementAndGet("runner.backoffs");
+
+
+            //todo 执行休眠操作, 休眠时间计算方式如下, 取最小值.
 
             Thread.sleep(Math.min(
                 counterGroup.incrementAndGet("runner.backoffs.consecutive")
                 * source.getBackOffSleepIncrement(), source.getMaxBackOffSleepInterval()));
+
           } else {
             counterGroup.set("runner.backoffs.consecutive", 0L);
           }
+
+
         } catch (InterruptedException e) {
           logger.info("Source runner interrupted. Exiting");
           counterGroup.incrementAndGet("runner.interruptions");

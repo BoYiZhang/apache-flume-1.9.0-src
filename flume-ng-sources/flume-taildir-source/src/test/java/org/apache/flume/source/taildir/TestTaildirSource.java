@@ -45,9 +45,7 @@ import org.mockito.internal.util.reflection.Whitebox;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.FILE_GROUPS;
@@ -71,10 +69,49 @@ public class TestTaildirSource {
   private File tmpDir;
   private String posFilePath;
 
-  @Before
-  public void setUp() {
+//  @Before
+//  public void setUp() {
+//    source = new TaildirSource();
+//    channel = new MemoryChannel();
+//
+//    Configurables.configure(channel, new Context());
+//
+//    List<Channel> channels = new ArrayList<Channel>();
+//    channels.add(channel);
+//
+//    ChannelSelector rcs = new ReplicatingChannelSelector();
+//    rcs.setChannels(channels);
+//
+//    source.setChannelProcessor(new ChannelProcessor(rcs));
+//    tmpDir = Files.createTempDir();
+//    posFilePath = tmpDir.getAbsolutePath() + "/taildir_position_test.json";
+//  }
+//
+//  @After
+//  public void tearDown() {
+//    for (File f : tmpDir.listFiles()) {
+//      f.delete();
+//    }
+//    tmpDir.delete();
+//  }
+
+  @Test
+  public void testRun() throws InterruptedException {
     source = new TaildirSource();
+
     channel = new MemoryChannel();
+
+    Map<String, String> parameters = new HashMap<>();
+    parameters.put("positionFile","/todo/flume/taildir/taildir_position.json") ;
+
+    parameters.put("channels","c1") ;
+    parameters.put("filegroups.f1","/todo/flume/taildir/input/data.log") ;
+    parameters.put("filegroups","f1") ;
+    parameters.put("fileHeader","true") ;
+    parameters.put("type","TAILDIR") ;
+    parameters.put("headers.f1.headerKey1","markHeaderKey") ;
+
+
 
     Configurables.configure(channel, new Context());
 
@@ -85,17 +122,22 @@ public class TestTaildirSource {
     rcs.setChannels(channels);
 
     source.setChannelProcessor(new ChannelProcessor(rcs));
-    tmpDir = Files.createTempDir();
-    posFilePath = tmpDir.getAbsolutePath() + "/taildir_position_test.json";
+
+
+    source.configure(new Context(parameters));
+
+    source.start();
+
+
+    source.process();
+
+
+    Thread.sleep(1000000);
+
+
   }
 
-  @After
-  public void tearDown() {
-    for (File f : tmpDir.listFiles()) {
-      f.delete();
-    }
-    tmpDir.delete();
-  }
+
 
   @Test
   public void testRegexFileNameFilteringEndToEnd() throws IOException {

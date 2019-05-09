@@ -20,6 +20,7 @@
 package org.apache.flume.node;
 
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
@@ -55,6 +56,10 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * --conf-file /todo/flume/nifi-source.conf --name a1
+ *
+ */
 public class Application {
 
   private static final Logger logger = LoggerFactory
@@ -215,6 +220,9 @@ public class Application {
     }
 
     // todo  启动所有的 source
+    ImmutableMap<String, SourceRunner> runner =  materializedConfiguration.getSourceRunners() ;
+
+    System.out.println(runner);
     for (Entry<String, SourceRunner> entry :
          materializedConfiguration.getSourceRunners().entrySet()) {
       try {

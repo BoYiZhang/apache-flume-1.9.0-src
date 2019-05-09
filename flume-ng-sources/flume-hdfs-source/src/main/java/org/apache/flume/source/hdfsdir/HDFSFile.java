@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.flume.source.taildir;
+package org.apache.flume.source.hdfsdir;
 
 import com.google.common.collect.Lists;
 import org.apache.flume.Event;
@@ -31,18 +31,18 @@ import java.io.RandomAccessFile;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.BYTE_OFFSET_HEADER_KEY;
+import static org.apache.flume.source.hdfsdir.HDFSdirSourceConfigurationConstants.BYTE_OFFSET_HEADER_KEY;
 
 
 /**
- * todo TaildirSource通过TailFile类操作处理每个日志文件，包含了RandomAccessFile类，
+ * todo HDFSdirSource通过HDFSFile类操作处理每个日志文件，包含了RandomAccessFile类，
  *  以及记录日志文件偏移量pos,最新更新时间lastUpdated等属性
- *  RandomAccessFile 完美的符合TaildirSource的应用场景，RandomAccessFile支持使用seek()方法随机访问文件，
+ *  RandomAccessFile 完美的符合HDFSdirSource的应用场景，RandomAccessFile支持使用seek()方法随机访问文件，
  *  配合position file中记录的日志文件读取偏移量，能够轻松简单的seek到文件偏移量，
  *  然后向后读取日志内容，并重新将新的偏移量记录到position file中。
  */
-public class TailFile {
-  private static final Logger logger = LoggerFactory.getLogger(TailFile.class);
+public class HDFSFile {
+  private static final Logger logger = LoggerFactory.getLogger(HDFSFile.class);
 
   private static final byte BYTE_NL = (byte) 10;
   private static final byte BYTE_CR = (byte) 13;
@@ -55,14 +55,14 @@ public class TailFile {
   private final long inode;
   private long pos;
   private long lastUpdated;
-  private boolean needTail;
+  private boolean needHDFS;
   private final Map<String, String> headers;
   private byte[] buffer;
   private byte[] oldBuffer;
   private int bufferPos;
   private long lineReadPos;
 
-  public TailFile(File file, Map<String, String> headers, long inode, long pos)
+  public HDFSFile(File file, Map<String, String> headers, long inode, long pos)
       throws IOException {
     this.raf = new RandomAccessFile(file, "r");
     if (pos > 0) {
@@ -73,7 +73,7 @@ public class TailFile {
     this.inode = inode;
     this.pos = pos;
     this.lastUpdated = 0L;
-    this.needTail = true;
+    this.needHDFS = true;
     this.headers = headers;
     this.oldBuffer = new byte[0];
     this.bufferPos = NEED_READING;
@@ -99,8 +99,8 @@ public class TailFile {
     return lastUpdated;
   }
 
-  public boolean needTail() {
-    return needTail;
+  public boolean needHDFS() {
+    return needHDFS;
   }
 
   public Map<String, String> getHeaders() {
@@ -119,8 +119,8 @@ public class TailFile {
     this.lastUpdated = lastUpdated;
   }
 
-  public void setNeedTail(boolean needTail) {
-    this.needTail = needTail;
+  public void setNeedHDFS(boolean needHDFS) {
+    this.needHDFS = needHDFS;
   }
 
   public void setLineReadPos(long lineReadPos) {

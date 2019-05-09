@@ -15,9 +15,21 @@
  * the License.
  */
 
-package org.apache.flume.source.taildir;
+package org.apache.flume.source.hdfsdir;
 
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.*;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.*;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.google.gson.Gson;
+import org.apache.flume.*;
+import org.apache.flume.conf.BatchSizeSupported;
+import org.apache.flume.conf.Configurable;
+import org.apache.flume.instrumentation.SourceCounter;
+import org.apache.flume.source.AbstractSource;
+import org.apache.flume.source.PollableSourceConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -28,39 +40,14 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
-import org.apache.flume.ChannelException;
-import org.apache.flume.Context;
-import org.apache.flume.Event;
-import org.apache.flume.FlumeException;
-import org.apache.flume.PollableSource;
-import org.apache.flume.conf.BatchSizeSupported;
-import org.apache.flume.conf.Configurable;
-import org.apache.flume.instrumentation.SourceCounter;
-import org.apache.flume.source.AbstractSource;
-import org.apache.flume.source.PollableSourceConstants;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.apache.flume.source.hdfsdir.HDFSdirSourceConfigurationConstants.*;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Table;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import com.google.gson.Gson;
-
-public class TaildirSource extends AbstractSource implements
+public class HDFSdirSource extends AbstractSource implements
     PollableSource, Configurable, BatchSizeSupported {
 
-  private static final Logger logger = LoggerFactory.getLogger(TaildirSource.class);
+  private static final Logger logger = LoggerFactory.getLogger(HDFSdirSource.class);
 
   private Map<String, String> filePaths;
   private Table<String, String, String> headerTable;
@@ -70,7 +57,7 @@ public class TaildirSource extends AbstractSource implements
   private boolean byteOffsetHeader;
 
   private SourceCounter sourceCounter;
-  private ReliableTaildirEventReader reader;
+  private ReliableHDFSdirEventReader reader;
   private ScheduledExecutorService idleFileChecker;
   private ScheduledExecutorService positionWriter;
   private int retryInterval = 1000;
@@ -90,15 +77,15 @@ public class TaildirSource extends AbstractSource implements
   private Long maxBatchCount;
 
 
-  // todo:  创建初始化后的变量创建了 ReliableTaildirEventReader 对象,
+  // todo:  创建初始化后的变量创建了 ReliableHDFSdirEventReader 对象,
   //        并启动两个线程池，分别是监控日志文件，记录日志文件读取的偏移量
   @Override
   public synchronized void start() {
-    logger.info("{} TaildirSource source starting with directory: {}", getName(), filePaths);
+    logger.info("{} HDFSdirSource source starting with directory: {}", getName(), filePaths);
     try {
 
 
-      reader = new ReliableTaildirEventReader.Builder()
+      reader = new ReliableHDFSdirEventReader.Builder()
           .filePaths(filePaths)
           .headerTable(headerTable)
           .positionFilePath(positionFilePath)
@@ -111,7 +98,7 @@ public class TaildirSource extends AbstractSource implements
 
 
     } catch (IOException e) {
-      throw new FlumeException("Error instantiating ReliableTaildirEventReader", e);
+      throw new FlumeException("Error instantiating ReliableHDFSdirEventReader", e);
     }
 
 
@@ -131,7 +118,7 @@ public class TaildirSource extends AbstractSource implements
     // todo  writePosInterval  默认值: 5000
     // todo positionWriter主要作用是记录日志文件读取的偏移量，
     //  以json格式（"inode", inode, "pos", tf.getPos(), "file", tf.getPath()），
-    //  其中inode是linux系统中特有属性，在适应其他系统（Windows等）日志采集时ReliableTaildirEventReader.getInode()方法需要修改。
+    //  其中inode是linux系统中特有属性，在适应其他系统（Windows等）日志采集时ReliableHDFSdirEventReader.getInode()方法需要修改。
     //  pos则是记录的日志读取的偏移量，file记录了日志文件的路径
     positionWriter = Executors.newSingleThreadScheduledExecutor(
         new ThreadFactoryBuilder().setNameFormat("positionWriter").build());
@@ -141,7 +128,7 @@ public class TaildirSource extends AbstractSource implements
 
     super.start();
 
-    logger.debug("TaildirSource started");
+    logger.debug("HDFSdirSource started");
     sourceCounter.start();
   }
 
@@ -165,12 +152,12 @@ public class TaildirSource extends AbstractSource implements
       logger.info("Failed: " + e.getMessage(), e);
     }
     sourceCounter.stop();
-    logger.info("Taildir source {} stopped. Metrics: {}", getName(), sourceCounter);
+    logger.info("HDFSdir source {} stopped. Metrics: {}", getName(), sourceCounter);
   }
 
   @Override
   public String toString() {
-    return String.format("Taildir source: { positionFile: %s, skipToEnd: %s, "
+    return String.format("HDFSdir source: { positionFile: %s, skipToEnd: %s, "
         + "byteOffsetHeader: %s, idleTimeout: %s, writePosInterval: %s }",
         positionFilePath, skipToEnd, byteOffsetHeader, idleTimeout, writePosInterval);
   }
@@ -196,7 +183,7 @@ public class TaildirSource extends AbstractSource implements
 
     //todo 判断文件路径是否为空
     Preconditions.checkState(!filePaths.isEmpty(),
-        "Mapping for tailing files is empty or invalid: '" + FILE_GROUPS_PREFIX + "'");
+        "Mapping for hdfsing files is empty or invalid: '" + FILE_GROUPS_PREFIX + "'");
 
 
     //todo  获取当前用户主目录
@@ -204,7 +191,7 @@ public class TaildirSource extends AbstractSource implements
 
 
      //  todo 获取positionFile 路径，带默认值
-    //  todo  默认: /var/log/flume/taildir_position.json
+    //  todo  默认: /var/log/flume/hdfsdir_position.json
 
     positionFilePath = context.getString(POSITION_FILE, homePath + DEFAULT_POSITION_FILE);
 
@@ -238,7 +225,7 @@ public class TaildirSource extends AbstractSource implements
     // todo idleTimeout日志文件在idleTimeout间隔时间，没有被修改，文件将被关闭 默认值: 120000
     idleTimeout = context.getInteger(IDLE_TIMEOUT, DEFAULT_IDLE_TIMEOUT);
 
-    // todo writePosInterval，TaildirSource读取每个监控文件都在位置文件中记录监控文件的已经读取的偏移量，
+    // todo writePosInterval，HDFSdirSource读取每个监控文件都在位置文件中记录监控文件的已经读取的偏移量，
     // todo writePosInterval 更新positionFile的间隔时间  默认值: 3000
     writePosInterval = context.getInteger(WRITE_POS_INTERVAL, DEFAULT_WRITE_POS_INTERVAL);
 
@@ -307,9 +294,9 @@ public class TaildirSource extends AbstractSource implements
 
 
   /**
-   * @describe: process方法记录了TailDirSource类中主要的逻辑，
-   * 获取每个监控的日志文件，调用tailFileProcess获取每个日志文件的更新数据，
-   * 并将每条记录转换为Event(具体细节要看ReliableTaildirEventReader的readEvents方法)
+   * @describe: process方法记录了HDFSDirSource类中主要的逻辑，
+   * 获取每个监控的日志文件，调用hdfsFileProcess获取每个日志文件的更新数据，
+   * 并将每条记录转换为Event(具体细节要看ReliableHDFSdirEventReader的readEvents方法)
    * 并读取解析而为了只关注需要关注的文件
    **/
 
@@ -320,28 +307,28 @@ public class TaildirSource extends AbstractSource implements
       // todo 清空记录存在inode的list
       existingInodes.clear();
 
-      // todo 调用ReliableTaildirEventReader对象的updateTailFiles方法获取要监控的日志文件。
-      existingInodes.addAll(reader.updateTailFiles());
+      // todo 调用ReliableHDFSdirEventReader对象的updateHDFSFiles方法获取要监控的日志文件。
+      existingInodes.addAll(reader.updateHDFSFiles());
 
 
       for (long inode : existingInodes) {
 
-        // todo 获取具体tailFile对象
-        TailFile tf = reader.getTailFiles().get(inode);
+        // todo 获取具体hdfsFile对象
+        HDFSFile tf = reader.getHDFSFiles().get(inode);
 
-        // todo 是否需要tail
-        if (tf.needTail()) {
+        // todo 是否需要hdfs
+        if (tf.needHDFS()) {
           // todo  获取每个日志文件的更新数据,并发送，其中包括文件规则是否满足
-          boolean hasMoreLines = tailFileProcess(tf, true);
+          boolean hasMoreLines = hdfsFileProcess(tf, true);
 
           if (hasMoreLines) {
             status = Status.READY;
           }
         }
       }
-      closeTailFiles();
+      closeHDFSFiles();
     } catch (Throwable t) {
-      logger.error("Unable to tail files", t);
+      logger.error("Unable to hdfs files", t);
       sourceCounter.incrementEventReadFail();
       status = Status.BACKOFF;
     }
@@ -358,7 +345,7 @@ public class TaildirSource extends AbstractSource implements
     return maxBackOffSleepInterval;
   }
 
-  private boolean tailFileProcess(TailFile tf, boolean backoffWithoutNL)
+  private boolean hdfsFileProcess(HDFSFile tf, boolean backoffWithoutNL)
       throws IOException, InterruptedException {
 
     long batchCount = 0;
@@ -389,7 +376,7 @@ public class TaildirSource extends AbstractSource implements
 
 
         //todo 只有以上的操作全部完成才会提交 .
-        //  更新内存中的TailFile状态, 然后由定时任务将信息写入磁盘
+        //  更新内存中的HDFSFile状态, 然后由定时任务将信息写入磁盘
         reader.commit();
 
 
@@ -421,11 +408,11 @@ public class TaildirSource extends AbstractSource implements
     }
   }
 
-  private void closeTailFiles() throws IOException, InterruptedException {
+  private void closeHDFSFiles() throws IOException, InterruptedException {
     for (long inode : idleInodes) {
-      TailFile tf = reader.getTailFiles().get(inode);
+      HDFSFile tf = reader.getHDFSFiles().get(inode);
       if (tf.getRaf() != null) { // when file has not closed yet
-        tailFileProcess(tf, false);
+        hdfsFileProcess(tf, false);
         tf.close();
         logger.info("Closed file: " + tf.getPath() + ", inode: " + inode + ", pos: " + tf.getPos());
       }
@@ -445,7 +432,7 @@ public class TaildirSource extends AbstractSource implements
     public void run() {
       try {
         long now = System.currentTimeMillis();
-        for (TailFile tf : reader.getTailFiles().values()) {
+        for (HDFSFile tf : reader.getHDFSFiles().values()) {
           if (tf.getLastUpdated() + idleTimeout < now && tf.getRaf() != null) {
             idleInodes.add(tf.getInode());
           }
@@ -494,7 +481,7 @@ public class TaildirSource extends AbstractSource implements
     @SuppressWarnings("rawtypes")
     List<Map> posInfos = Lists.newArrayList();
     for (Long inode : existingInodes) {
-      TailFile tf = reader.getTailFiles().get(inode);
+      HDFSFile tf = reader.getHDFSFiles().get(inode);
       posInfos.add(ImmutableMap.of("inode", inode, "pos", tf.getPos(), "file", tf.getPath()));
     }
     return new Gson().toJson(posInfos);

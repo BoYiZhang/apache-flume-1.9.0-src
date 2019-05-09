@@ -46,15 +46,32 @@ public class TestApplication {
 
   private File baseDir;
 
-  @Before
-  public void setup() throws Exception {
-    baseDir = Files.createTempDir();
+//  @Before
+//  public void setup() throws Exception {
+//    baseDir = Files.createTempDir();
+//  }
+
+
+  @Test
+  public void run() throws Exception {
+    String [] args = new String [4];
+
+    args[0] = "--conf-file";
+    args[1] = "/todo/flume/taildir/taildir-source.conf";
+    args[2] = "--name";
+    args[3] = "a1";
+
+    Application.main(args);
+
+    Thread.sleep(1000000);
   }
 
-  @After
-  public void tearDown() throws Exception {
-    FileUtils.deleteDirectory(baseDir);
-  }
+
+
+//  @After
+//  public void tearDown() throws Exception {
+//    FileUtils.deleteDirectory(baseDir);
+//  }
 
   private <T extends LifecycleAware> T mockLifeCycle(Class<T> klass) {
 
