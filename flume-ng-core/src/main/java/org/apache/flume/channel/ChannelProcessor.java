@@ -175,6 +175,9 @@ public class ChannelProcessor implements Configurable {
         }
 
         eventQueue.add(event);
+
+
+        System.out.println("eventQueue size : "+ eventQueue.size());
       }
     }
 
@@ -191,7 +194,12 @@ public class ChannelProcessor implements Configurable {
           reqChannel.put(event);
         }
 
+
+
         tx.commit();
+
+        System.out.println("reqChannelQueue size : "+ reqChannelQueue.size());
+
       } catch (Throwable t) {
         tx.rollback();
         if (t instanceof Error) {
@@ -223,7 +231,13 @@ public class ChannelProcessor implements Configurable {
           optChannel.put(event);
         }
 
+
+
         tx.commit();
+
+        System.out.println("optChannelQueue size : "+ optChannelQueue.size());
+
+
       } catch (Throwable t) {
         tx.rollback();
         LOG.error("Unable to put batch on optional channel: " + optChannel, t);

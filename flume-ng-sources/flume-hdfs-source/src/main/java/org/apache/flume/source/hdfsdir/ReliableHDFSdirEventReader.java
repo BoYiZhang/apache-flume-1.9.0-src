@@ -1,21 +1,4 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+
 
 package org.apache.flume.source.hdfsdir;
 
@@ -30,15 +13,17 @@ import org.apache.flume.FlumeException;
 import org.apache.flume.annotations.InterfaceAudience;
 import org.apache.flume.annotations.InterfaceStability;
 import org.apache.flume.client.avro.ReliableEventReader;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+
+
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -49,12 +34,15 @@ import java.util.Map.Entry;
 public class ReliableHDFSdirEventReader implements ReliableEventReader {
   private static final Logger logger = LoggerFactory.getLogger(ReliableHDFSdirEventReader.class);
 
+
+  private  FileSystem fileSystem ;
+
   private final List<HDFSdirMatcher> hdfsdirCache;
 
   private final Table<String, String, String> headerTable;
 
   private HDFSFile currentFile = null;
-  private Map<Long, HDFSFile> hdfsFiles = Maps.newHashMap();
+  private Map<String, HDFSFile> hdfsFiles = Maps.newHashMap();
   private long updateTime;
   private boolean addByteOffset;
   private boolean cachePatternMatching;
@@ -62,14 +50,19 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
   private final boolean annotateFileName;
   private final String fileNameHeader;
 
+  private String filePattern;
+
   /**
    * Create a ReliableHDFSdirEventReader to watch the given directory.
    */
-  private ReliableHDFSdirEventReader(Map<String, String> filePaths,
+  private ReliableHDFSdirEventReader(FileSystem fileSystem , Map<String, String> filePaths,String filePattern,
       Table<String, String, String> headerTable, String positionFilePath,
       boolean skipToEnd, boolean addByteOffset, boolean cachePatternMatching,
-      boolean annotateFileName, String fileNameHeader) throws IOException {
+      boolean annotateFileName, String fileNameHeader) throws Exception {
+
+
     // Sanity checks
+    Preconditions.checkNotNull(fileSystem);
     Preconditions.checkNotNull(filePaths);
     Preconditions.checkNotNull(positionFilePath);
 
@@ -80,11 +73,13 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
 
     List<HDFSdirMatcher> hdfsdirCache = Lists.newArrayList();
     for (Entry<String, String> e : filePaths.entrySet()) {
-      hdfsdirCache.add(new HDFSdirMatcher(e.getKey(), e.getValue(), cachePatternMatching));
+      hdfsdirCache.add(new HDFSdirMatcher(fileSystem, e.getKey(), e.getValue(), filePattern, cachePatternMatching));
     }
     logger.info("hdfsdirCache: " + hdfsdirCache.toString());
     logger.info("headerTable: " + headerTable.toString());
 
+    this.fileSystem = fileSystem;
+    this.filePattern = filePattern ;
     this.hdfsdirCache = hdfsdirCache;
     this.headerTable = headerTable;
     this.addByteOffset = addByteOffset;
@@ -107,9 +102,17 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
    * 如果位置文件存在，更新hdfsFiles映射。
    *
    */
-  public void loadPositionFile(String filePath) {
-    Long inode, pos;
+  public void loadPositionFile(String filePath) throws Exception {
+    Long  pos;
     String path;
+
+    //todo 验证索引日志文件大小
+    File file = new File(filePath);
+    if(file.length() == 0 ){
+      System.out.println("索引日志文件大小为 0 ......");
+      return;
+    }
+
     FileReader fr = null;
     JsonReader jr = null;
     try {
@@ -117,14 +120,14 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
       jr = new JsonReader(fr);
       jr.beginArray();
       while (jr.hasNext()) {
-        inode = null;
+
         pos = null;
         path = null;
         jr.beginObject();
         while (jr.hasNext()) {
           switch (jr.nextName()) {
-            case "inode":
-              inode = jr.nextLong();
+            case "path":
+              path = jr.nextString();
               break;
             case "pos":
               pos = jr.nextLong();
@@ -136,33 +139,33 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
         }
         jr.endObject();
 
-        for (Object v : Arrays.asList(inode, pos, path)) {
+        for (Object v : Arrays.asList( pos, path)) {
           Preconditions.checkNotNull(v, "Detected missing value in position file. "
-              + "inode: " + inode + ", pos: " + pos + ", path: " + path);
+              + "  pos: " + pos + ", path: " + path);
         }
-        HDFSFile tf = hdfsFiles.get(inode);
-        if (tf != null && tf.updatePos(path, inode, pos)) {
-          hdfsFiles.put(inode, tf);
+        HDFSFile tf = hdfsFiles.get(path);
+        if (tf != null && tf.updatePos(path, pos)) {
+          hdfsFiles.put(path, tf);
         } else {
-          logger.info("Missing file: " + path + ", inode: " + inode + ", pos: " + pos);
+          logger.info("Missing file: " + path + ", pos: " + pos);
         }
       }
       jr.endArray();
     } catch (FileNotFoundException e) {
       logger.info("File not found: " + filePath + ", not updating position");
-    } catch (IOException e) {
+    } catch (Exception e) {
       logger.error("Failed loading positionFile: " + filePath, e);
     } finally {
       try {
         if (fr != null) fr.close();
         if (jr != null) jr.close();
-      } catch (IOException e) {
+      } catch (Exception e) {
         logger.error("Error: " + e.getMessage(), e);
       }
     }
   }
 
-  public Map<Long, HDFSFile> getHDFSFiles() {
+  public Map<String, HDFSFile> getHDFSFiles() {
     return hdfsFiles;
   }
 
@@ -252,48 +255,39 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
     }
   }
 
-  /**
-   * Update hdfsFiles mapping if a new file is created or appends are detected
-   * to the existing file.
-   */
-  public List<Long> updateHDFSFiles(boolean skipToEnd) throws IOException {
+
+  public List<String> updateHDFSFiles(boolean skipToEnd) throws Exception {
     updateTime = System.currentTimeMillis();
-    List<Long> updatedInodes = Lists.newArrayList();
+    List<String> updatedInodes = Lists.newArrayList();
     //todo     获取缓存中的 hdfsdir ,
-    //todo     hdfsdir对象内容:   {filegroup='f1', filePattern='/todo/flume/hdfsdir/input/data.log', cached=true}
+    //todo     hdfsdir对象内容:   {filegroup='f1', filePattern='data.log', cached=true}
     for (HDFSdirMatcher hdfsdir : hdfsdirCache) {
-      //todo    hdfsdir     :  {filegroup='f1', filePattern='/todo/flume/hdfsdir/input/data.log', cached=true}
+      //todo    hdfsdir     :  {filegroup='f1', filePattern='data.log', cached=true}
       //todo    headerTable :  {f1={headerKey1=markHeaderKey}}
       Map<String, String> headers = headerTable.row(hdfsdir.getFileGroup());
       // todo 获取匹配文件,并将文件按最后修改时间进行排序
-      for (File f : hdfsdir.getMatchingFiles()) {
-        long inode;
-        try {
-
-          //todo 获取文件的  inode   只支持 unix:ino   这里写死了
-          inode = getInode(f);
-
-        } catch (NoSuchFileException e) {
-          logger.info("File has been deleted in the meantime: " + e.getMessage());
-          continue;
-        }
-
-        HDFSFile tf = hdfsFiles.get(inode);
+      for (FileStatus f : hdfsdir.getMatchingFiles()) {
 
 
-        if (tf == null || !tf.getPath().equals(f.getAbsolutePath())) {
+        String  path = f.getPath().toString();
+
+
+        HDFSFile tf = hdfsFiles.get(path);
+
+
+        if (tf == null || !tf.getPath().equals(f.getPath().toString())) {
 
           //todo , 缓存中没有,或者路径不一样.  就认为是新建的数据.
 
-          long startPos = skipToEnd ? f.length() : 0;
+          long startPos = skipToEnd ? f.getLen() : 0;
 
           //todo 读取文件获取 操作对象实例 HDFSFile
-          tf = openFile(f, headers, inode, startPos);
+          tf = openFile(fileSystem, f.getPath().toString(), headers, startPos);
 
 
         } else {
           //todo , 缓存中存在, 判断 更新文件修改最后修改日期, 文件的大小是否有过变动.
-          boolean updated = tf.getLastUpdated() < f.lastModified() || tf.getPos() != f.length();
+          boolean updated = tf.getLastUpdated() < f.getModificationTime() || tf.getPos() != f.getLen();
 
 
           if (updated) {
@@ -301,16 +295,15 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
             if (tf.getRaf() == null) {
 
 
-              tf = openFile(f, headers, inode, tf.getPos());
+              tf = openFile(fileSystem, f.getPath().toString(), headers, tf.getPos());
 
 
             }
-            if (f.length() < tf.getPos()) {
+            if (f.getLen() < tf.getPos()) {
               logger.info("Pos " + tf.getPos() + " is larger than file size! "
-                  + "Restarting from pos 0, file: " + tf.getPath() + ", inode: " + inode);
+                  + "Restarting from pos 0, file: " + tf.getPath() );
 
-
-              tf.updatePos(tf.getPath(), inode, 0);
+              tf.updatePos(tf.getPath(), 0);
 
 
             }
@@ -324,10 +317,10 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
         }
 
         //todo 更新文件
-        hdfsFiles.put(inode, tf);
+        hdfsFiles.put(path, tf);
 
 
-        updatedInodes.add(inode);
+        updatedInodes.add(path);
 
 
       }
@@ -335,24 +328,18 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
     return updatedInodes;
   }
 
-  public List<Long> updateHDFSFiles() throws IOException {
+  public List<String> updateHDFSFiles() throws Exception {
     return updateHDFSFiles(false);
   }
 
-
-  private long getInode(File file) throws IOException {
-    long inode = (long) Files.getAttribute(file.toPath(), "unix:ino");
-    return inode;
-  }
-
-
   //todo  方法根据日志文件对象，headers，inode和偏移量pos创建一个HDFSFile对象
-  private HDFSFile openFile(File file, Map<String, String> headers, long inode, long pos) {
+  private HDFSFile openFile(FileSystem fileSystem , String path, Map<String, String> headers, long pos) {
     try {
-      logger.info("Opening file: " + file + ", inode: " + inode + ", pos: " + pos);
-      return new HDFSFile(file, headers, inode, pos);
-    } catch (IOException e) {
-      throw new FlumeException("Failed opening file: " + file, e);
+      logger.info("Opening path: " + path + ", pos: " + pos);
+
+      return new HDFSFile(fileSystem,path, headers, pos);
+    } catch (Exception e) {
+      throw new FlumeException("Failed opening file path : " + path, e);
     }
   }
 
@@ -360,7 +347,10 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
    * Special builder class for ReliableHDFSdirEventReader
    */
   public static class Builder {
+
+    private FileSystem fileSystem ;
     private Map<String, String> filePaths;
+    private String filePattern ;
     private Table<String, String, String> headerTable;
     private String positionFilePath;
     private boolean skipToEnd;
@@ -371,8 +361,20 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
     private String fileNameHeader =
             HDFSdirSourceConfigurationConstants.DEFAULT_FILENAME_HEADER_KEY;
 
+    public Builder fileSystem(FileSystem fileSystem) {
+      this.fileSystem = fileSystem;
+      return this;
+    }
+
+
+
     public Builder filePaths(Map<String, String> filePaths) {
       this.filePaths = filePaths;
+      return this;
+    }
+
+    public Builder filePattern(String filePattern) {
+      this.filePattern = filePattern;
       return this;
     }
 
@@ -411,8 +413,8 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
       return this;
     }
 
-    public ReliableHDFSdirEventReader build() throws IOException {
-      return new ReliableHDFSdirEventReader(filePaths, headerTable, positionFilePath, skipToEnd,
+    public ReliableHDFSdirEventReader build() throws Exception {
+      return new ReliableHDFSdirEventReader(fileSystem, filePaths,filePattern, headerTable, positionFilePath, skipToEnd,
                                             addByteOffset, cachePatternMatching,
                                             annotateFileName, fileNameHeader);
     }

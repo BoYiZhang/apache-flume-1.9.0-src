@@ -22,12 +22,15 @@ package org.apache.flume.source.hdfsdir;
 import com.google.common.collect.Lists;
 import org.apache.flume.Event;
 import org.apache.flume.event.EventBuilder;
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+
 import java.util.List;
 import java.util.Map;
 
@@ -35,9 +38,9 @@ import static org.apache.flume.source.hdfsdir.HDFSdirSourceConfigurationConstant
 
 
 /**
- * todo HDFSdirSource通过HDFSFile类操作处理每个日志文件，包含了RandomAccessFile类，
+ * todo HDFSdirSource通过HDFSFile类操作处理每个日志文件，包含了FSDataInputStream类，
  *  以及记录日志文件偏移量pos,最新更新时间lastUpdated等属性
- *  RandomAccessFile 完美的符合HDFSdirSource的应用场景，RandomAccessFile支持使用seek()方法随机访问文件，
+ *  FSDataInputStream 完美的符合HDFSdirSource的应用场景，FSDataInputStream支持使用seek()方法随机访问文件，
  *  配合position file中记录的日志文件读取偏移量，能够轻松简单的seek到文件偏移量，
  *  然后向后读取日志内容，并重新将新的偏移量记录到position file中。
  */
@@ -50,9 +53,9 @@ public class HDFSFile {
   private static final int BUFFER_SIZE = 8192;
   private static final int NEED_READING = -1;
 
-  private RandomAccessFile raf;
+  private FSDataInputStream raf;
+
   private final String path;
-  private final long inode;
   private long pos;
   private long lastUpdated;
   private boolean needHDFS;
@@ -62,15 +65,23 @@ public class HDFSFile {
   private int bufferPos;
   private long lineReadPos;
 
-  public HDFSFile(File file, Map<String, String> headers, long inode, long pos)
-      throws IOException {
-    this.raf = new RandomAccessFile(file, "r");
+  private long length;
+
+  public HDFSFile(FileSystem fileSystem , String path, Map<String, String> headers , long pos)  throws Exception {
+
+    Path hdfsPath = new Path(path) ;
+
+    this.raf = (FSDataInputStream) fileSystem.open(hdfsPath);
+
+    FileStatus fileStatus = fileSystem.listStatus(hdfsPath)[0];
+
+    this.length = fileStatus.getLen();
+
     if (pos > 0) {
       raf.seek(pos);
       lineReadPos = pos;
     }
-    this.path = file.getAbsolutePath();
-    this.inode = inode;
+    this.path = path;
     this.pos = pos;
     this.lastUpdated = 0L;
     this.needHDFS = true;
@@ -79,16 +90,12 @@ public class HDFSFile {
     this.bufferPos = NEED_READING;
   }
 
-  public RandomAccessFile getRaf() {
+  public FSDataInputStream getRaf() {
     return raf;
   }
 
   public String getPath() {
     return path;
-  }
-
-  public long getInode() {
-    return inode;
   }
 
   public long getPos() {
@@ -127,11 +134,11 @@ public class HDFSFile {
     this.lineReadPos = lineReadPos;
   }
 
-  public boolean updatePos(String path, long inode, long pos) throws IOException {
-    if (this.inode == inode && this.path.equals(path)) {
+  public boolean updatePos(String path, long pos) throws IOException {
+    if (this.path.equals(path)) {
       setPos(pos);
       updateFilePos(pos);
-      logger.info("Updated position, file: " + path + ", inode: " + inode + ", pos: " + pos);
+      logger.info("Updated position, file: " + path +  ", pos: " + pos);
       return true;
     }
     return false;
@@ -185,13 +192,14 @@ public class HDFSFile {
     //todo 过滤掉已经读取的数据.
     if (backoffWithoutNL && !line.lineSepInclude) {
       logger.info("Backing off in file without newline: "
-          + path + ", inode: " + inode + ", pos: " + raf.getFilePointer());
+          + path + " , pos: " + raf.getPos());
 
       updateFilePos(posTmp);
 
       return null;
     }
 
+    System.out.println("line: " + new String(line.line));
     Event event = EventBuilder.withBody(line.line);
 
     // todo 是否要增加偏移量
@@ -210,9 +218,11 @@ public class HDFSFile {
 
   private void readFile() throws IOException {
     //todo 如果 数据长度小于缓冲, 则根据文件容量创建缓冲区
-    if ((raf.length() - raf.getFilePointer()) < BUFFER_SIZE) {
 
-      buffer = new byte[(int) (raf.length() - raf.getFilePointer())];
+
+    if ((this.length - raf.getPos()) < BUFFER_SIZE) {
+
+      buffer = new byte[(int) (this.length - raf.getPos())];
 
     } else {
     //todo 如果 数据长度大于缓冲, 折直接创建缓冲区 8kb
@@ -245,7 +255,7 @@ public class HDFSFile {
       if (bufferPos == NEED_READING) {
 
         //todo 当文件指针位置小于文件总长度的时候，就需要读取指针位置到文件最后的数据
-        if (raf.getFilePointer() < raf.length()) {
+        if (raf.getPos() < this.length) {
 
           readFile();
 
@@ -339,7 +349,7 @@ public class HDFSFile {
       long now = System.currentTimeMillis();
       setLastUpdated(now);
     } catch (IOException e) {
-      logger.error("Failed closing file: " + path + ", inode: " + inode, e);
+      logger.error("Failed closing file: " + path , e);
     }
   }
 

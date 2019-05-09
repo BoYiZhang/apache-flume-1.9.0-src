@@ -28,12 +28,15 @@ import org.apache.flume.conf.Configurable;
 import org.apache.flume.instrumentation.SourceCounter;
 import org.apache.flume.source.AbstractSource;
 import org.apache.flume.source.PollableSourceConstants;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -49,6 +52,9 @@ public class HDFSdirSource extends AbstractSource implements
 
   private static final Logger logger = LoggerFactory.getLogger(HDFSdirSource.class);
 
+
+  private FileSystem fileSystem ;
+  private String filePattern ;
   private Map<String, String> filePaths;
   private Table<String, String, String> headerTable;
   private int batchSize;
@@ -68,8 +74,8 @@ public class HDFSdirSource extends AbstractSource implements
   private int writePosInterval;
   private boolean cachePatternMatching;
 
-  private List<Long> existingInodes = new CopyOnWriteArrayList<Long>();
-  private List<Long> idleInodes = new CopyOnWriteArrayList<Long>();
+  private List<String> existingPaths = new CopyOnWriteArrayList<String>();
+  private List<String> idlePaths = new CopyOnWriteArrayList<String>();
   private Long backoffSleepIncrement;
   private Long maxBackOffSleepInterval;
   private boolean fileHeader;
@@ -84,9 +90,10 @@ public class HDFSdirSource extends AbstractSource implements
     logger.info("{} HDFSdirSource source starting with directory: {}", getName(), filePaths);
     try {
 
-
       reader = new ReliableHDFSdirEventReader.Builder()
+          .fileSystem(fileSystem)
           .filePaths(filePaths)
+          .filePattern(filePattern)
           .headerTable(headerTable)
           .positionFilePath(positionFilePath)
           .skipToEnd(skipToEnd)
@@ -97,7 +104,8 @@ public class HDFSdirSource extends AbstractSource implements
           .build();
 
 
-    } catch (IOException e) {
+    } catch (Exception e) {
+      e.printStackTrace();
       throw new FlumeException("Error instantiating ReliableHDFSdirEventReader", e);
     }
 
@@ -135,6 +143,7 @@ public class HDFSdirSource extends AbstractSource implements
   @Override
   public synchronized void stop() {
     try {
+
       super.stop();
       ExecutorService[] services = {idleFileChecker, positionWriter};
       for (ExecutorService service : services) {
@@ -148,8 +157,16 @@ public class HDFSdirSource extends AbstractSource implements
       reader.close();
     } catch (InterruptedException e) {
       logger.info("Interrupted while awaiting termination", e);
-    } catch (IOException e) {
+    } catch (Exception e) {
       logger.info("Failed: " + e.getMessage(), e);
+    }finally {
+      if(null != fileSystem){
+        try {
+          fileSystem.close();
+        } catch (Exception e) {
+          e.printStackTrace();
+        }
+      }
     }
     sourceCounter.stop();
     logger.info("HDFSdir source {} stopped. Metrics: {}", getName(), sourceCounter);
@@ -169,6 +186,28 @@ public class HDFSdirSource extends AbstractSource implements
    */
   @Override
   public synchronized void configure(Context context) {
+
+    Configuration conf = new Configuration();
+    try {
+
+
+      String hdfsUri = context.getString(HDFS_URI);
+
+      String hdfsUser = context.getString(HDFS_USER,DEFAULT_HDFS_USER);
+
+      String filePattern = context.getString(FILE_PATTERN);
+
+
+      FileSystem fileSystem = FileSystem.get(new URI(hdfsUri), conf, hdfsUser);
+
+
+      this.fileSystem = fileSystem ;
+      this.filePattern = filePattern ;
+
+
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
 
 
     //todo  以空格分隔的文件组列表。每个文件组都指示一组要挂起的文件。
@@ -305,16 +344,16 @@ public class HDFSdirSource extends AbstractSource implements
     Status status = Status.BACKOFF;
     try {
       // todo 清空记录存在inode的list
-      existingInodes.clear();
+      existingPaths.clear();
 
       // todo 调用ReliableHDFSdirEventReader对象的updateHDFSFiles方法获取要监控的日志文件。
-      existingInodes.addAll(reader.updateHDFSFiles());
+      existingPaths.addAll(reader.updateHDFSFiles());
 
 
-      for (long inode : existingInodes) {
+      for (String path : existingPaths) {
 
         // todo 获取具体hdfsFile对象
-        HDFSFile tf = reader.getHDFSFiles().get(inode);
+        HDFSFile tf = reader.getHDFSFiles().get(path);
 
         // todo 是否需要hdfs
         if (tf.needHDFS()) {
@@ -409,15 +448,15 @@ public class HDFSdirSource extends AbstractSource implements
   }
 
   private void closeHDFSFiles() throws IOException, InterruptedException {
-    for (long inode : idleInodes) {
-      HDFSFile tf = reader.getHDFSFiles().get(inode);
+    for (String path : idlePaths) {
+      HDFSFile tf = reader.getHDFSFiles().get(path);
       if (tf.getRaf() != null) { // when file has not closed yet
         hdfsFileProcess(tf, false);
         tf.close();
-        logger.info("Closed file: " + tf.getPath() + ", inode: " + inode + ", pos: " + tf.getPos());
+        logger.info("Closed file: " + tf.getPath() + ", path: " + path + ", pos: " + tf.getPos());
       }
     }
-    idleInodes.clear();
+    idlePaths.clear();
   }
 
   /**
@@ -434,7 +473,7 @@ public class HDFSdirSource extends AbstractSource implements
         long now = System.currentTimeMillis();
         for (HDFSFile tf : reader.getHDFSFiles().values()) {
           if (tf.getLastUpdated() + idleTimeout < now && tf.getRaf() != null) {
-            idleInodes.add(tf.getInode());
+            idlePaths.add(tf.getPath());
           }
         }
       } catch (Throwable t) {
@@ -460,7 +499,7 @@ public class HDFSdirSource extends AbstractSource implements
     FileWriter writer = null;
     try {
       writer = new FileWriter(file);
-      if (!existingInodes.isEmpty()) {
+      if (!existingPaths.isEmpty()) {
         String json = toPosInfoJson();
         writer.write(json);
       }
@@ -480,9 +519,9 @@ public class HDFSdirSource extends AbstractSource implements
   private String toPosInfoJson() {
     @SuppressWarnings("rawtypes")
     List<Map> posInfos = Lists.newArrayList();
-    for (Long inode : existingInodes) {
-      HDFSFile tf = reader.getHDFSFiles().get(inode);
-      posInfos.add(ImmutableMap.of("inode", inode, "pos", tf.getPos(), "file", tf.getPath()));
+    for (String path : existingPaths) {
+      HDFSFile tf = reader.getHDFSFiles().get(path);
+      posInfos.add(ImmutableMap.of("path", path, "pos", tf.getPos(), "file", tf.getPath()));
     }
     return new Gson().toJson(posInfos);
   }

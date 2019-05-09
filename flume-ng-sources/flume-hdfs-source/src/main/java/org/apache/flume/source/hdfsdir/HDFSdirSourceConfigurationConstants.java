@@ -18,9 +18,19 @@
 package org.apache.flume.source.hdfsdir;
 
 public class HDFSdirSourceConfigurationConstants {
+
+  /** Mapping for hdfs  uri */
+  public static final String HDFS_URI = "hdfsURI";
+  public static final String HDFS_USER = "hdfsUser";
+  public static final String DEFAULT_HDFS_USER = "hadoop";
+
+
+
   /** Mapping for hdfsing file groups. */
   public static final String FILE_GROUPS = "filegroups";
   public static final String FILE_GROUPS_PREFIX = FILE_GROUPS + ".";
+  public static final String FILE_PATTERN = "filePattern";
+
 
   /** Mapping for putting headers to events grouped by file groups. */
   public static final String HEADERS_PREFIX = "headers.";
