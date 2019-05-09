@@ -113,10 +113,6 @@ public class HDFSdirMatcher {
   private List<FileStatus> getMatchingFilesNoCache() throws Exception {
     List<FileStatus> result = Lists.newArrayList();
 
-    System.out.println(this.parentDir.getPath());
-    System.out.println(this.filePattern);
-
-
     FileStatus[]  fileStatuses = fileSystem.listStatus(this.parentDir.getPath(),new RegexExcludePathFilter(this.filePattern));
 
     if(null != fileStatuses && fileStatuses.length > 0 ){

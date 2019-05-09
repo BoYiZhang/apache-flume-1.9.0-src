@@ -199,7 +199,8 @@ public class HDFSFile {
       return null;
     }
 
-    System.out.println("line: " + new String(line.line));
+    logger.debug("line: " + new String(line.line));
+
     Event event = EventBuilder.withBody(line.line);
 
     // todo 是否要增加偏移量

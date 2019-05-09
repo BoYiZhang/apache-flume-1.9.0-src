@@ -109,7 +109,8 @@ public class ReliableHDFSdirEventReader implements ReliableEventReader {
     //todo 验证索引日志文件大小
     File file = new File(filePath);
     if(file.length() == 0 ){
-      System.out.println("索引日志文件大小为 0 ......");
+      logger.warn("索引日志文件大小为 0 ......");
+
       return;
     }
 
