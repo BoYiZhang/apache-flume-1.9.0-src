@@ -74,7 +74,7 @@ public class HDFSdirMatcher {
       if(fileStatus.isDirectory()){
         this.parentDir = fileStatus;
 
-        PathFilter hdfsFilter =new RegexExcludePathFilter(filePattern);
+        PathFilter hdfsFilter =new RegexIncludePathFilter(filePattern);
 
         FileStatus [] fileStatuses = fileSystem.listStatus(hdfsPath, hdfsFilter);
 
@@ -113,7 +113,7 @@ public class HDFSdirMatcher {
   private List<FileStatus> getMatchingFilesNoCache() throws Exception {
     List<FileStatus> result = Lists.newArrayList();
 
-    FileStatus[]  fileStatuses = fileSystem.listStatus(this.parentDir.getPath(),new RegexExcludePathFilter(this.filePattern));
+    FileStatus[]  fileStatuses = fileSystem.listStatus(this.parentDir.getPath(),new RegexIncludePathFilter(this.filePattern));
 
     if(null != fileStatuses && fileStatuses.length > 0 ){
       result = Arrays.asList(fileStatuses);
@@ -170,15 +170,16 @@ public class HDFSdirMatcher {
 }
 
 
-class RegexExcludePathFilter implements PathFilter {
+class RegexIncludePathFilter implements PathFilter {
   private final String regex;
-  public RegexExcludePathFilter(String regex) {
+  public RegexIncludePathFilter(String regex) {
     this.regex = regex;
   }
   public boolean accept(Path path) {
     if(null == regex){
       return  true;
     }
+
     return path.getName().matches(regex);
   }
 }

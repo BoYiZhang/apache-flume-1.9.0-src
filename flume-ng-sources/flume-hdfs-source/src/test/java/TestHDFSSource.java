@@ -40,7 +40,7 @@ public class TestHDFSSource {
 
         parameters.put("hdfsURI","hdfs://bj-rack001-hadoop002:8020") ;
         parameters.put("hdfsUser","hadoop") ;
-        parameters.put("filePattern","data.log") ;
+        parameters.put("filePattern","(.*).log") ;
 
 
 

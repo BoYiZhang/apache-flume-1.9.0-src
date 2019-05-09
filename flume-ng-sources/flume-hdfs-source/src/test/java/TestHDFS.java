@@ -29,7 +29,7 @@ public class TestHDFS {
         path = new Path("hdfs://bj-rack001-hadoop002:8020/tmp/zl/flume/") ;
 
 
-        pathFilter(fileSystem,path,"data.log");
+        pathFilter(fileSystem,path,"(.*).log");
 
 
 
@@ -83,7 +83,7 @@ public class TestHDFS {
 
 //        PathFilter hdfsFilter =new RegexExcludePathFilter("^*.log$");
 
-        PathFilter hdfsFilter =new RegexExcludePathFilter(filter);
+        PathFilter hdfsFilter =new RegexIncludePathFilter(filter);
 
         FileStatus [] array = fileSystem.listStatus(path, hdfsFilter);
 
@@ -97,15 +97,20 @@ public class TestHDFS {
 
 
 
-class RegexExcludePathFilter implements PathFilter {
+class RegexIncludePathFilter implements PathFilter {
   private final String regex;
-  public RegexExcludePathFilter(String regex) {
+  public RegexIncludePathFilter(String regex) {
     this.regex = regex;
   }
   public boolean accept(Path path) {
       if(null == regex){
           return  true;
       }
+
+      System.out.println(path.getName());
+      System.out.println(path.getName().matches(regex));
       return path.getName().matches(regex);
+
+
   }
 }

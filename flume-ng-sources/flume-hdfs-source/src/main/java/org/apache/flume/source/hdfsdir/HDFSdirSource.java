@@ -416,8 +416,12 @@ public class HDFSdirSource extends AbstractSource implements
 
         //todo 只有以上的操作全部完成才会提交 .
         //  更新内存中的HDFSFile状态, 然后由定时任务将信息写入磁盘
+
+
         reader.commit();
 
+
+        logger.info( " evnet  commit ! ,  path : "+tf.getPath() +" ,  evnet size : "+ events.size() );
 
       } catch (ChannelException ex) {
         logger.warn("The channel is full or unexpected failure. " +
